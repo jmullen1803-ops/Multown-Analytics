@@ -12,7 +12,7 @@ import extra_streamlit_components as stx
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="Recruitment Anlysis",
+    page_title="Recruitment Analysis",
     layout="wide"
 )
 
@@ -1688,23 +1688,17 @@ elif page == "Recruitment Focus":
         recruitment_data["Position"].map(position_to_group)
     )
 
-    def get_player_score(row):
-        group = row.get("Position Group")
+    recruitment_data["Recruitment Score"] = pd.NA
 
-        if pd.isna(group):
-            return pd.NA
+    for group, score_column in group_score_map.items():
 
-        score_column = group_score_map[group]
+        if score_column in recruitment_data.columns:
 
-        if score_column in row.index:
-            return row[score_column]
+            mask = recruitment_data["Position Group"] == group
 
-        return pd.NA
-
-    recruitment_data["Recruitment Score"] = recruitment_data.apply(
-        get_player_score,
-        axis=1
-    )
+            recruitment_data.loc[mask, "Recruitment Score"] = (
+                recruitment_data.loc[mask, score_column]
+            )
 
     recruitment_data["Recruitment Score"] = pd.to_numeric(
         recruitment_data["Recruitment Score"],
