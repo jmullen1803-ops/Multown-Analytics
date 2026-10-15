@@ -118,6 +118,34 @@ def load_data():
 
 scores, players = load_data()
 
+@st.cache_data
+def prepare_player_data(players):
+    profile_data = players.copy()
+
+    profile_data["Year"] = profile_data["Year"].astype(str)
+
+    profile_data["Position"] = (
+        profile_data["Position"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    profile_data["Minutes_played"] = pd.to_numeric(
+        profile_data["Minutes_played"],
+        errors="coerce"
+    )
+
+    profile_data["League"] = (
+        profile_data["League"].fillna("Unknown").astype(str)
+    )
+
+    return profile_data
+
+
+profile_data = prepare_player_data(players)
+
 
 def open_player_profile(player_name, team=None, season=None):
     st.session_state["profile_player_to_open"] = str(player_name)
@@ -1854,10 +1882,6 @@ elif page == "Player Profiles":
     # LOAD PLAYER DATA
     # --------------------------------------------------
 
-    
-    profile_data = players.copy()
-
-    profile_data["Year"] = profile_data["Year"].astype(str)
 
     profile_data["Position"] = (
             profile_data["Position"].astype(str).str.upper()
@@ -2171,19 +2195,6 @@ elif page == "Player Profiles":
             # ------------------------------------------
 
             percentile_data = profile_data
-
-            percentile_data["Year"] = (
-                percentile_data["Year"].astype(str)
-            )
-
-            percentile_data["Position"] = (
-                percentile_data["Position"].astype(str).str.upper()
-            )
-
-            percentile_data["Minutes_played"] = pd.to_numeric(
-                percentile_data["Minutes_played"],
-                errors="coerce"
-            )
 
             target_mask = (
                 (percentile_data["Player"] == selected_player)
@@ -2558,23 +2569,6 @@ elif page == "Player Profiles":
             # ------------------------------------------
 
             scatter_data = profile_data
-
-            scatter_data["Year"] = (
-                scatter_data["Year"].astype(str)
-            )
-
-            scatter_data["Position"] = (
-                scatter_data["Position"].astype(str).str.upper()
-            )
-
-            scatter_data["Minutes_played"] = pd.to_numeric(
-                scatter_data["Minutes_played"],
-                errors="coerce",
-            )
-
-            scatter_data["League"] = (
-                scatter_data["League"].fillna("Unknown").astype(str)
-            )
 
             target_mask = (
                 (scatter_data["Player"] == selected_player)
@@ -2984,24 +2978,8 @@ elif page == "Player Comparison":
     # PREPARE DATA
     # --------------------------------------------------
 
-    comparison_data = players.copy()
+    comparison_data = profile_data
 
-    comparison_data["Year"] = (
-        comparison_data["Year"].astype(str)
-    )
-
-    comparison_data["Position"] = (
-        comparison_data["Position"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    comparison_data["Minutes_played"] = pd.to_numeric(
-        comparison_data["Minutes_played"],
-        errors="coerce"
-    )
 
     player_options = sorted(
         comparison_data["Player"].dropna().unique().tolist()
