@@ -1,0 +1,7 @@
+[theme]
+primaryColor = "#171717"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F3"
+textColor = "#171717"
+linkColor = "#171717"
+linkUnderline = false
