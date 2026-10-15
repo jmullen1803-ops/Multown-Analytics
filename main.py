@@ -8,11 +8,120 @@ import hmac
 import extra_streamlit_components as stx
 
 # --------------------------------------------------
+# PASSWORD PROTECTION — 8-HOUR COOKIE SESSION
+# --------------------------------------------------
+
+SESSION_DURATION = 8 * 60 * 60
+COOKIE_NAME = "elgin_auth"
+
+# Local development uses HTTP.
+# Change to True when deployed on HTTPS.
+COOKIE_SECURE = False
+
+if "cookie_manager" not in st.session_state:
+    st.session_state["cookie_manager"] = stx.CookieManager(
+        key="elgin_auth_cookie_manager"
+    )
+
+cookie_manager = st.session_state["cookie_manager"]
+
+
+def create_auth_token():
+    expiry = int(time.time()) + SESSION_DURATION
+    signing_key = st.secrets["cookie_signing_key"]
+
+    signature = hmac.new(
+        signing_key.encode("utf-8"),
+        str(expiry).encode("utf-8"),
+        digestmod="sha256"
+    ).hexdigest()
+
+    return f"{expiry}.{signature}"
+
+
+def valid_auth_token(token):
+    if not isinstance(token, str):
+        return False
+
+    try:
+        expiry_text, supplied_signature = token.split(".", 1)
+        expiry = int(expiry_text)
+
+        if expiry <= time.time():
+            return False
+
+        signing_key = st.secrets["cookie_signing_key"]
+
+        expected_signature = hmac.new(
+            signing_key.encode("utf-8"),
+            expiry_text.encode("utf-8"),
+            digestmod="sha256"
+        ).hexdigest()
+
+        return hmac.compare_digest(
+            supplied_signature,
+            expected_signature
+        )
+
+    except (ValueError, TypeError):
+        return False
+
+
+def check_password():
+    # Keep a successful login for the current Streamlit session
+    if st.session_state.get("logged_in", False):
+        return True
+
+    cookies = cookie_manager.get_all(key="read_auth_cookies")
+    token = cookies.get(COOKIE_NAME) if cookies else None
+
+    if valid_auth_token(token):
+        st.session_state["logged_in"] = True
+        return True
+
+    st.title("Elgin City FC")
+    st.subheader("Scouting Dashboard")
+
+    with st.form("login_form"):
+        password = st.text_input(
+            "Enter password",
+            type="password"
+        )
+        submitted = st.form_submit_button("Log in")
+
+    if submitted:
+        if hmac.compare_digest(
+            password,
+            st.secrets["app_password"]
+        ):
+            st.session_state["logged_in"] = True
+
+            cookie_manager.set(
+                COOKIE_NAME,
+                create_auth_token(),
+                key="set_auth_cookie",
+                path="/",
+                max_age=SESSION_DURATION,
+                secure=COOKIE_SECURE,
+                same_site="lax"
+            )
+
+            return True
+
+        st.error("Incorrect password")
+
+    return False
+
+
+if not check_password():
+    st.stop()
+
+# --------------------------------------------------
 # PAGE CONFIGURATION
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="Multown Analytics",
+    page_title="Elgin City",
     layout="wide"
 )
 
@@ -106,36 +215,8 @@ h1 {
 DATA_DIR = Path("data")
 REPORTS_DIR = Path("reports")
 
-@st.cache_data
-def load_data():
-    scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
-    players = pd.read_csv(DATA_DIR / "all_leagues.csv")
-    return scores, players
-
-scores, players = load_data()
-@st.cache_data
-def prepare_profile_data(players):
-    profile_players = players.copy()
-
-    profile_players["Year"] = profile_players["Year"].astype(str)
-
-    profile_players["Position"] = (
-        profile_players["Position"].astype(str).str.upper()
-    )
-
-    profile_players["Minutes_played"] = pd.to_numeric(
-        profile_players["Minutes_played"],
-        errors="coerce"
-    )
-
-    profile_players["League"] = (
-        profile_players["League"].fillna("Unknown").astype(str)
-    )
-
-    return profile_players
-
-
-profile_players = prepare_profile_data(players)
+scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
+players = pd.read_csv(DATA_DIR / "all_leagues.csv")
 
 def open_player_profile(player_name, team=None, season=None):
     st.session_state["profile_player_to_open"] = str(player_name)
@@ -720,13 +801,13 @@ if page == "Home":
     # Player table with clickable player names
     display_data = filtered_players[selected_columns].copy()
 
-    display_data["Player"] = (
-        "?profile_player="
-        + filtered_players["Player"].astype(str)
-        + "&profile_team="
-        + filtered_players["Team"].astype(str)
-        + "&profile_season="
-        + filtered_players["Year"].astype(str)
+    display_data["Player"] = filtered_players.apply(
+        lambda row: (
+            f"?profile_player={row['Player']}"
+            f"&profile_team={row['Team']}"
+            f"&profile_season={row['Year']}"
+        ),
+        axis=1
     )
 
     st.dataframe(
@@ -1677,15 +1758,24 @@ elif page == "Recruitment Focus":
     recruitment_data["Position Group"] = (
         recruitment_data["Position"].map(position_to_group)
     )
-    recruitment_data["Recruitment Score"] = pd.NA
 
-    for group, score_column in group_score_map.items():
-        mask = recruitment_data["Position Group"] == group
+    def get_player_score(row):
+        group = row.get("Position Group")
 
-    recruitment_data.loc[mask, "Recruitment Score"] = (
-        recruitment_data.loc[mask, score_column]
+        if pd.isna(group):
+            return pd.NA
+
+        score_column = group_score_map[group]
+
+        if score_column in row.index:
+            return row[score_column]
+
+        return pd.NA
+
+    recruitment_data["Recruitment Score"] = recruitment_data.apply(
+        get_player_score,
+        axis=1
     )
-
 
     recruitment_data["Recruitment Score"] = pd.to_numeric(
         recruitment_data["Recruitment Score"],
@@ -2163,7 +2253,20 @@ elif page == "Player Profiles":
             # Keep the existing percentile calculation
             # ------------------------------------------
 
-            percentile_data = profile_players.copy()
+            percentile_data = players.copy()
+
+            percentile_data["Year"] = (
+                percentile_data["Year"].astype(str)
+            )
+
+            percentile_data["Position"] = (
+                percentile_data["Position"].astype(str).str.upper()
+            )
+
+            percentile_data["Minutes_played"] = pd.to_numeric(
+                percentile_data["Minutes_played"],
+                errors="coerce"
+            )
 
             target_mask = (
                 (percentile_data["Player"] == selected_player)
@@ -2537,7 +2640,24 @@ elif page == "Player Profiles":
             # PREPARE DATA
             # ------------------------------------------
 
-            scatter_data = profile_players.copy()
+            scatter_data = players.copy()
+
+            scatter_data["Year"] = (
+                scatter_data["Year"].astype(str)
+            )
+
+            scatter_data["Position"] = (
+                scatter_data["Position"].astype(str).str.upper()
+            )
+
+            scatter_data["Minutes_played"] = pd.to_numeric(
+                scatter_data["Minutes_played"],
+                errors="coerce",
+            )
+
+            scatter_data["League"] = (
+                scatter_data["League"].fillna("Unknown").astype(str)
+            )
 
             target_mask = (
                 (scatter_data["Player"] == selected_player)
