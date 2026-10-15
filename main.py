@@ -1,11 +1,14 @@
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+import plotly.graph_objects as go
+import plotly.express as px
 from pathlib import Path
 import time
 import hashlib
 import hmac
 import extra_streamlit_components as stx
+from pyinstrument import Profiler
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
@@ -103,50 +106,21 @@ h1 {
 # PROJECT PATHS AND DATA
 # --------------------------------------------------
 
-
 DATA_DIR = Path("data")
 REPORTS_DIR = Path("reports")
 
-@st.cache_data
-def load_data():
-    start = time.perf_counter()
-
-    scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
-    players = pd.read_csv(DATA_DIR / "all_leagues.csv")
-
-    print(f"CSV loading took {time.perf_counter() - start:.2f} seconds")
-
-    return scores, players
-
-scores, players = load_data()
 
 @st.cache_data
-def prepare_player_data(players):
-    profile_data = players.copy()
-
-    profile_data["Year"] = profile_data["Year"].astype(str)
-
-    profile_data["Position"] = (
-        profile_data["Position"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    profile_data["Minutes_played"] = pd.to_numeric(
-        profile_data["Minutes_played"],
-        errors="coerce"
-    )
-
-    profile_data["League"] = (
-        profile_data["League"].fillna("Unknown").astype(str)
-    )
-
-    return profile_data
+def load_scores():
+    return pd.read_csv(DATA_DIR / "z_score_all.csv")
 
 
-profile_data = prepare_player_data(players)
+@st.cache_data
+def load_players():
+    return pd.read_csv(DATA_DIR / "all_leagues.csv")
+
+
+players = load_players()
 
 
 def open_player_profile(player_name, team=None, season=None):
@@ -377,6 +351,45 @@ POSITION_GROUPS = {
         "title": "Centre Forward Profile",
     },
 }
+
+@st.cache_data
+def prepare_player_data(players):
+    profile_data = players.copy()
+
+    profile_data["Year"] = profile_data["Year"].astype(str)
+
+    profile_data["Position"] = (
+        profile_data["Position"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    profile_data["Minutes_played"] = pd.to_numeric(
+        profile_data["Minutes_played"],
+        errors="coerce"
+    )
+
+    profile_data["League"] = (
+        profile_data["League"].fillna("Unknown").astype(str)
+    )
+    numeric_metrics = list({
+        metric
+        for metrics in ROLE_METRICS.values()
+        for metric in metrics
+    })
+
+    for metric in numeric_metrics:
+        if metric in profile_data.columns:
+            profile_data[metric] = pd.to_numeric(
+                profile_data[metric],
+                errors="coerce"
+            )
+    return profile_data
+
+
+profile_data = prepare_player_data(players)
 
 # Clear table selections before those widgets are created
 if st.session_state.pop("clear_player_table_selection", False):
@@ -732,14 +745,13 @@ if page == "Home":
     # Player table with clickable player names
     display_data = filtered_players[selected_columns].copy()
 
-    display_data["Player"] = filtered_players.apply(
-        lambda row: (
-            f"?profile_player={row['Player']}"
-            f"&profile_team={row['Team']}"
-            f"&profile_season={row['Year']}"
-        ),
-        axis=1
+    
+    display_data["Player"] = (
+        "?profile_player=" + filtered_players["Player"].astype(str)
+        + "&profile_team=" + filtered_players["Team"].astype(str)
+        + "&profile_season=" + filtered_players["Year"].astype(str)
     )
+
 
     st.dataframe(
         display_data,
@@ -947,9 +959,7 @@ elif page == "Scoring Framework":
 # --------------------------------------------------
 
 elif page == "Squad Report":
-
-    import plotly.express as px
-    import plotly.graph_objects as go
+    scores = load_scores()
 
     st.title("Squad Report")
 
@@ -985,7 +995,6 @@ elif page == "Squad Report":
             index=default_index,
             key="squad_report_team"
         )
-
         team_data = scores[
             scores["Team"] == selected_team
         ].copy()
@@ -1421,8 +1430,7 @@ elif page == "Squad Report":
 # --------------------------------------------------
 
 elif page == "Recruitment Focus":
-
-    import pandas as pd
+    scores = load_scores()
 
     st.title("Recruitment Focus")
 
@@ -1865,9 +1873,7 @@ elif page == "Recruitment Focus":
 # --------------------------------------------------
 
 elif page == "Player Profiles":
-
-    import pandas as pd
-    import plotly.graph_objects as go
+    scores = load_scores()
 
     st.title("Player Profiles")
 
@@ -1875,21 +1881,7 @@ elif page == "Player Profiles":
     # LOAD PLAYER DATA
     # --------------------------------------------------
 
-
-    profile_data["Position"] = (
-            profile_data["Position"].astype(str).str.upper()
-        )
-
-    profile_data["Minutes_played"] = pd.to_numeric(
-            profile_data["Minutes_played"],
-            errors="coerce"
-        )
-
-    profile_data["League"] = (
-            profile_data["League"].fillna("Unknown").astype(str)
-)
-
-
+    profile_data = prepare_player_data(players)
 
     # --------------------------------------------------
     # PLAYER SELECTORS
@@ -2159,8 +2151,9 @@ elif page == "Player Profiles":
     # MAIN PROFILE LAYOUT
     # --------------------------------------------------
 
-    left_col, right_col = st.columns([1.15, 1], gap="large")
-
+    # Use the full page width while scatter plots are disabled
+    left_col = st.container()
+    
            # --------------------------------------------------
     # LEFT: PERCENTILE CHART
     # --------------------------------------------------
@@ -2534,435 +2527,13 @@ elif page == "Player Profiles":
                             "responsive": True,
                         },
                     )
-
-    # --------------------------------------------------
-    # RIGHT: SCATTER PLOTS
-    # --------------------------------------------------
-
-    with right_col:
-        st.write("")
-        st.write("")
-        st.write("")
-        st.write("")
-        st.write("")
-        st.write("")
-
-
-        if role not in SCATTER_METRICS:
-            st.warning(
-                f"No scatter plot configuration exists for "
-                f"position '{player_position}'."
-            )
-
-        else:
-            position_scatter = SCATTER_METRICS[role]
-
-            # ------------------------------------------
-            # PREPARE DATA
-            # ------------------------------------------
-
-            scatter_data = profile_data
-
-            target_mask = (
-                (scatter_data["Player"] == selected_player)
-                & (scatter_data["Team"] == selected_team)
-                & (scatter_data["Year"] == str(selected_season))
-            )
-
-            peer_mask = (
-                scatter_data["Position"].isin(comparison_positions)
-                | target_mask
-            ) & (
-                scatter_data["Year"] == str(selected_season)
-            ) & (
-                scatter_data["Minutes_played"] >= 200
-            )
-
-            scatter_data = scatter_data.loc[peer_mask].copy()
-
-            scatter_data["Selected"] = (
-                (scatter_data["Player"] == selected_player)
-                & (scatter_data["Team"] == selected_team)
-                & (scatter_data["Year"] == str(selected_season))
-            )
-
-            # ------------------------------------------
-            # LEAGUE COLOURS
-            # ------------------------------------------
-
-            league_palette = [
-                "#2878B5",  # Blue
-                "#E08B36",  # Orange
-                "#35A776",  # Green
-                "#D65F59",  # Red
-                "#8B6BB1",  # Purple
-            ]
-
-            # Keep known league colours consistent
-            league_colour_map = {
-                "Scottish L1": "#2878B5",
-                "Scottish L2": "#E08B36",
-            }
-
-            available_leagues = sorted(
-                scatter_data["League"].unique()
-            )
-
-            next_colour = 0
-
-            for league in available_leagues:
-                if league not in league_colour_map:
-                    used_colours = set(league_colour_map.values())
-
-                    while (
-                        league_palette[next_colour % len(league_palette)]
-                        in used_colours
-                    ):
-                        next_colour += 1
-
-                    league_colour_map[league] = (
-                        league_palette[next_colour % len(league_palette)]
-                    )
-
-                    next_colour += 1
-
-            scatter_data["LeagueColour"] = (
-                scatter_data["League"].map(league_colour_map)
-            )
-
-            # ------------------------------------------
-            # SCATTER PLOT FUNCTION
-            # ------------------------------------------
-
-            def create_scatter_plot(data, metric_config, plot_title):
-
-                x_metric = metric_config["x"]
-                y_metric = metric_config["y"]
-
-                x_label = metric_config["x_label"]
-                y_label = metric_config["y_label"]
-
-                missing = [
-                    metric
-                    for metric in [x_metric, y_metric]
-                    if metric not in data.columns
-                ]
-
-                if missing:
-                    st.warning(
-                        f"{plot_title} cannot be displayed because "
-                        f"these metrics are missing: "
-                        f"{', '.join(missing)}."
-                    )
-                    return
-
-                plot_data = data.copy()
-
-                plot_data[x_metric] = pd.to_numeric(
-                    plot_data[x_metric],
-                    errors="coerce",
-                )
-
-                plot_data[y_metric] = pd.to_numeric(
-                    plot_data[y_metric],
-                    errors="coerce",
-                )
-
-                plot_data = plot_data.dropna(
-                    subset=[x_metric, y_metric]
-                )
-
-                if plot_data.empty:
-                    st.info(
-                        f"No players have usable data for {plot_title}."
-                    )
-                    return
-
-                comparison = plot_data[
-                    ~plot_data["Selected"]
-                ]
-
-                selected = plot_data[
-                    plot_data["Selected"]
-                ]
-
-                fig = go.Figure()
-
-                # --------------------------------------
-                # COMPARISON PLAYERS BY LEAGUE
-                # --------------------------------------
-
-                for league in available_leagues:
-
-                    league_players = comparison[
-                        comparison["League"] == league
-                    ]
-
-                    if league_players.empty:
-                        continue
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=league_players[x_metric],
-                            y=league_players[y_metric],
-                            mode="markers",
-                            name=league,
-                            text=league_players["Player"],
-                            customdata=league_players[
-                                ["Team", "Minutes_played"]
-                            ].to_numpy(),
-                            marker=dict(
-                                size=8,
-                                color=league_colour_map[league],
-                                opacity=0.82,
-                                line=dict(
-                                    color="white",
-                                    width=0.5,
-                                ),
-                            ),
-                            hovertemplate=(
-                                "<b>%{text}</b>"
-                                "<br>Team: %{customdata[0]}"
-                                f"<br>{x_label}: "
-                                "%{x:.2f}"
-                                f"<br>{y_label}: "
-                                "%{y:.2f}"
-                                "<br>Minutes: %{customdata[1]:.0f}"
-                                "<extra></extra>"
-                            ),
-                        )
-                    )
-
-                # --------------------------------------
-                # AVERAGE REFERENCE LINES AND QUADRANTS
-                # --------------------------------------
-
-                if not comparison.empty:
-
-                    x_mean = comparison[x_metric].mean()
-                    y_mean = comparison[y_metric].mean()
-
-                    fig.add_vline(
-                        x=x_mean,
-                        line_dash="dash",
-                        line_color="#B0B0B0",
-                        line_width=1,
-                    )
-
-                    fig.add_hline(
-                        y=y_mean,
-                        line_dash="dash",
-                        line_color="#B0B0B0",
-                        line_width=1,
-                    )
-
-                    x_min = plot_data[x_metric].min()
-                    x_max = plot_data[x_metric].max()
-                    y_min = plot_data[y_metric].min()
-                    y_max = plot_data[y_metric].max()
-
-                    x_range = max(x_max - x_min, 0.01)
-                    y_range = max(y_max - y_min, 0.01)
-
-                    quadrant_annotations = [
-                        (
-                            x_min + x_range * 0.03,
-                            y_max - y_range * 0.04,
-                            "",
-                            "left",
-                            "top",
-                        ),
-                        (
-                            x_max - x_range * 0.03,
-                            y_max - y_range * 0.04,
-                            "",
-                            "right",
-                            "top",
-                        ),
-                        (
-                            x_min + x_range * 0.03,
-                            y_min + y_range * 0.04,
-                            "",
-                            "left",
-                            "bottom",
-                        ),
-                        (
-                            x_max - x_range * 0.03,
-                            y_min + y_range * 0.04,
-                            "",
-                            "right",
-                            "bottom",
-                        ),
-                    ]
-
-                    for (
-                        x_pos,
-                        y_pos,
-                        label,
-                        x_anchor,
-                        y_anchor,
-                    ) in quadrant_annotations:
-
-                        fig.add_annotation(
-                            x=x_pos,
-                            y=y_pos,
-                            text=label,
-                            showarrow=False,
-                            xanchor=x_anchor,
-                            yanchor=y_anchor,
-                            font=dict(
-                                size=9,
-                                color="#A0A0A0",
-                            ),
-                        )
-
-                # --------------------------------------
-                # SELECTED PLAYER
-                # --------------------------------------
-
-                if not selected.empty:
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=selected[x_metric],
-                            y=selected[y_metric],
-                            mode="markers+text",
-                            name=selected_player,
-                            text=selected["Player"],
-                            textposition="top center",
-                            textfont=dict(
-                                size=11,
-                                color="#171717",
-                            ),
-                            marker=dict(
-                                size=14,
-                                color="#C8A64B",
-                                symbol="circle",
-                                line=dict(
-                                    color="#8A7133",
-                                    width=1,
-                                ),
-                            ),
-                            customdata=selected[
-                                ["Team", "Minutes_played"]
-                            ].to_numpy(),
-                            hovertemplate=(
-                                "<b>%{text}</b>"
-                                "<br>Team: %{customdata[0]}"
-                                f"<br>{x_label}: "
-                                "%{x:.2f}"
-                                f"<br>{y_label}: "
-                                "%{y:.2f}"
-                                "<br>Minutes: %{customdata[1]:.0f}"
-                                "<extra></extra>"
-                            ),
-                        )
-                    )
-
-                # --------------------------------------
-                # CHART LAYOUT
-                # --------------------------------------
-
-                fig.update_layout(
-                    title=dict(
-                        text=plot_title,
-                        x=0,
-                        xanchor="left",
-                        font=dict(
-                            size=16,
-                            color="#171717",
-                        ),
-                    ),
-                    height=360,
-                    autosize=True,
-                    margin=dict(
-                        l=55,
-                        r=130,
-                        t=55,
-                        b=55,
-                    ),
-                    paper_bgcolor="white",
-                    plot_bgcolor="white",
-                    font=dict(
-                        family="Arial",
-                        size=11,
-                        color="#171717",
-                    ),
-                    showlegend=True,
-                    legend=dict(
-                        title=dict(text="League"),
-                        orientation="v",
-                        x=1.02,
-                        xanchor="left",
-                        y=0.5,
-                        yanchor="middle",
-                        font=dict(size=10),
-                    ),
-                    xaxis=dict(
-                        title=x_label,
-                        showgrid=True,
-                        gridcolor="#EAEAEA",
-                        zeroline=False,
-                        showline=False,
-                    ),
-                    yaxis=dict(
-                        title=y_label,
-                        showgrid=True,
-                        gridcolor="#EAEAEA",
-                        zeroline=False,
-                        showline=False,
-                    ),
-                )
-
-                # --------------------------------------
-                # DISPLAY CHART
-                # --------------------------------------
-
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    config={
-                        "displayModeBar": False,
-                        "responsive": True,
-                    },
-                )
-
-                excluded_count = len(data) - len(plot_data)
-
-                if excluded_count > 0:
-                    st.caption(
-                        f"{excluded_count} records excluded from this "
-                        "plot because one or both plotted metrics "
-                        "were missing."
-                    )
-
-            # ------------------------------------------
-            # ATTACKING SCATTER PLOT
-            # ------------------------------------------
-
-            create_scatter_plot(
-                scatter_data,
-                position_scatter["attacking"],
-                position_scatter["attacking"]["title"],
-            )
-
-            # ------------------------------------------
-            # DEFENDING SCATTER PLOT
-            # ------------------------------------------
-
-            create_scatter_plot(
-                scatter_data,
-                position_scatter["defending"],
-                position_scatter["defending"]["title"],
-            )
+    # Scatter plots temporarily disabled while performance is investigated.
 
 # --------------------------------------------------
 # PLAYER COMPARISON
 # --------------------------------------------------
 
 elif page == "Player Comparison":
-
-    import plotly.graph_objects as go
 
     st.title("Player Comparison")
 
