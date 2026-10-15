@@ -12,7 +12,7 @@ import extra_streamlit_components as stx
 # --------------------------------------------------
 
 st.set_page_config(
-    page_title="Elgin City",
+    page_title="Multown Analytics",
     layout="wide"
 )
 
