@@ -107,14 +107,16 @@ h1 {
 DATA_DIR = Path("data")
 REPORTS_DIR = Path("reports")
 
-
 @st.cache_data
 def load_data():
+    start = time.perf_counter()
+
     scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
     players = pd.read_csv(DATA_DIR / "all_leagues.csv")
 
-    return scores, players
+    print(f"CSV loading took {time.perf_counter() - start:.2f} seconds")
 
+    return scores, players
 
 scores, players = load_data()
 
@@ -1429,7 +1431,7 @@ elif page == "Recruitment Focus":
     # --------------------------------------------------
 
     score_data = scores.copy()
-    stats_data = players.copy()
+    stats_data = players
 
     score_columns = [
         "FB Score",
@@ -1818,14 +1820,11 @@ elif page == "Recruitment Focus":
 
 
         # Make player names clickable
-        display_data["Name"] = recruitment_data.apply(
-            lambda row: (
-                f"?profile_player={row['Player']}"
-                f"&profile_team={row['Team']}"
-                f"&profile_season={row['Year']}"
-            ),
-            axis=1
-        )
+            display_data["Name"] = (
+                "?profile_player=" + recruitment_data["Player"].astype(str)
+                + "&profile_team=" + recruitment_data["Team"].astype(str)
+                + "&profile_season=" + recruitment_data["Year"].astype(str)
+            )
 
         st.dataframe(
             display_data,
