@@ -106,8 +106,39 @@ h1 {
 DATA_DIR = Path("data")
 REPORTS_DIR = Path("reports")
 
-scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
-players = pd.read_csv(DATA_DIR / "all_leagues.csv")
+@st.cache_data
+def load_data():
+    scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
+    players = pd.read_csv(DATA_DIR / "all_leagues.csv")
+    return scores, players
+
+scores, players = load_data()
+@st.cache_data
+def prepare_profile_data(players):
+    profile_players = players.copy()
+
+    profile_players["Year"] = profile_players["Year"].astype(str)
+
+    profile_players["Position"] = (
+        profile_players["Position"].astype(str).str.upper()
+    )
+
+    profile_players["Minutes_played"] = pd.to_numeric(
+        profile_players["Minutes_played"],
+        errors="coerce"
+    )
+
+    profile_players["League"] = (
+        profile_players["League"].fillna("Unknown").astype(str)
+    )
+
+    return profile_players
+
+
+profile_players = prepare_profile_data(players)
+
+
+profile_players = load_profile_data()
 
 def open_player_profile(player_name, team=None, season=None):
     st.session_state["profile_player_to_open"] = str(player_name)
@@ -692,13 +723,13 @@ if page == "Home":
     # Player table with clickable player names
     display_data = filtered_players[selected_columns].copy()
 
-    display_data["Player"] = filtered_players.apply(
-        lambda row: (
-            f"?profile_player={row['Player']}"
-            f"&profile_team={row['Team']}"
-            f"&profile_season={row['Year']}"
-        ),
-        axis=1
+    display_data["Player"] = (
+        "?profile_player="
+        + filtered_players["Player"].astype(str)
+        + "&profile_team="
+        + filtered_players["Team"].astype(str)
+        + "&profile_season="
+        + filtered_players["Year"].astype(str)
     )
 
     st.dataframe(
@@ -1649,24 +1680,15 @@ elif page == "Recruitment Focus":
     recruitment_data["Position Group"] = (
         recruitment_data["Position"].map(position_to_group)
     )
+    recruitment_data["Recruitment Score"] = pd.NA
 
-    def get_player_score(row):
-        group = row.get("Position Group")
+    for group, score_column in group_score_map.items():
+        mask = recruitment_data["Position Group"] == group
 
-        if pd.isna(group):
-            return pd.NA
-
-        score_column = group_score_map[group]
-
-        if score_column in row.index:
-            return row[score_column]
-
-        return pd.NA
-
-    recruitment_data["Recruitment Score"] = recruitment_data.apply(
-        get_player_score,
-        axis=1
+    recruitment_data.loc[mask, "Recruitment Score"] = (
+        recruitment_data.loc[mask, score_column]
     )
+
 
     recruitment_data["Recruitment Score"] = pd.to_numeric(
         recruitment_data["Recruitment Score"],
@@ -2144,20 +2166,7 @@ elif page == "Player Profiles":
             # Keep the existing percentile calculation
             # ------------------------------------------
 
-            percentile_data = players.copy()
-
-            percentile_data["Year"] = (
-                percentile_data["Year"].astype(str)
-            )
-
-            percentile_data["Position"] = (
-                percentile_data["Position"].astype(str).str.upper()
-            )
-
-            percentile_data["Minutes_played"] = pd.to_numeric(
-                percentile_data["Minutes_played"],
-                errors="coerce"
-            )
+            percentile_data = profile_players.copy()
 
             target_mask = (
                 (percentile_data["Player"] == selected_player)
@@ -2531,24 +2540,7 @@ elif page == "Player Profiles":
             # PREPARE DATA
             # ------------------------------------------
 
-            scatter_data = players.copy()
-
-            scatter_data["Year"] = (
-                scatter_data["Year"].astype(str)
-            )
-
-            scatter_data["Position"] = (
-                scatter_data["Position"].astype(str).str.upper()
-            )
-
-            scatter_data["Minutes_played"] = pd.to_numeric(
-                scatter_data["Minutes_played"],
-                errors="coerce",
-            )
-
-            scatter_data["League"] = (
-                scatter_data["League"].fillna("Unknown").astype(str)
-            )
+            scatter_data = profile_players.copy()
 
             target_mask = (
                 (scatter_data["Player"] == selected_player)
