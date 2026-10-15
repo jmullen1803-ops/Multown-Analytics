@@ -137,9 +137,6 @@ def prepare_profile_data(players):
 
 profile_players = prepare_profile_data(players)
 
-
-profile_players = load_profile_data()
-
 def open_player_profile(player_name, team=None, season=None):
     st.session_state["profile_player_to_open"] = str(player_name)
 
