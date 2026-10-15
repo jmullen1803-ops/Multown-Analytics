@@ -103,11 +103,21 @@ h1 {
 # PROJECT PATHS AND DATA
 # --------------------------------------------------
 
+
 DATA_DIR = Path("data")
 REPORTS_DIR = Path("reports")
 
-scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
-players = pd.read_csv(DATA_DIR / "all_leagues.csv")
+
+@st.cache_data
+def load_data():
+    scores = pd.read_csv(DATA_DIR / "z_score_all.csv")
+    players = pd.read_csv(DATA_DIR / "all_leagues.csv")
+
+    return scores, players
+
+
+scores, players = load_data()
+
 
 def open_player_profile(player_name, team=None, season=None):
     st.session_state["profile_player_to_open"] = str(player_name)
@@ -1844,8 +1854,24 @@ elif page == "Player Profiles":
     # LOAD PLAYER DATA
     # --------------------------------------------------
 
+    
     profile_data = players.copy()
-    profile_data["Year"] = profile_data["Year"].astype("string")
+
+    profile_data["Year"] = profile_data["Year"].astype(str)
+
+    profile_data["Position"] = (
+            profile_data["Position"].astype(str).str.upper()
+        )
+
+    profile_data["Minutes_played"] = pd.to_numeric(
+            profile_data["Minutes_played"],
+            errors="coerce"
+        )
+
+    profile_data["League"] = (
+            profile_data["League"].fillna("Unknown").astype(str)
+)
+
 
 
     # --------------------------------------------------
@@ -2144,7 +2170,7 @@ elif page == "Player Profiles":
             # Keep the existing percentile calculation
             # ------------------------------------------
 
-            percentile_data = players.copy()
+            percentile_data = profile_data
 
             percentile_data["Year"] = (
                 percentile_data["Year"].astype(str)
@@ -2531,7 +2557,7 @@ elif page == "Player Profiles":
             # PREPARE DATA
             # ------------------------------------------
 
-            scatter_data = players.copy()
+            scatter_data = profile_data
 
             scatter_data["Year"] = (
                 scatter_data["Year"].astype(str)
