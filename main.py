@@ -8,7 +8,7 @@ import time
 import hashlib
 import hmac
 import extra_streamlit_components as stx
-from pyinstrument import Profiler
+
 
 # --------------------------------------------------
 # PAGE CONFIGURATION
